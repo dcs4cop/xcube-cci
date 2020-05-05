@@ -42,5 +42,6 @@ setup(
     license='MIT',
     author='xcube Development Team',
     packages=packages,
+    include_package_data=True,
     install_requires=requirements,
 )
