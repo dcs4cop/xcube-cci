@@ -8,7 +8,9 @@ dependencies:
   - aiohttp>=3.6
   - lxml>=4.5
   - pydap >= 3.2
+  - oauthlib
 
   - pip:
     # Required
     - nest_asyncio
+    - requests_oauthlib
