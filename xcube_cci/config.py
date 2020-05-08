@@ -173,11 +173,11 @@ class CubeConfig:
         return self._variable_names
 
     @property
-    def variable_units(self) -> Union[None, str, Tuple[str, ...]]:
+    def variable_units(self) -> Optional[Union[str, Tuple[str, ...]]]:
         return self._variable_units
 
     @property
-    def variable_data_types(self) -> Union[None, str, Tuple[str, ...]]:
+    def variable_data_types(self) -> Optional[Union[str, Tuple[str, ...]]]:
         return self._variable_data_types
 
     @property

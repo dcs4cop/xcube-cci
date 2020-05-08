@@ -1,4 +1,4 @@
-FROM quay.io/bcdev/xcube-python-deps:0.3.0
+FROM quay.io/bcdev/xcube-python-deps:0.4.2
 
 LABEL maintainer="helge.dzierzon@brockmann-consult.de"
 LABEL name=xcube-cci
