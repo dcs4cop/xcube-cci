@@ -293,7 +293,10 @@ async def _fetch_variable_infos(dataset_id: str, session):
         for variable_info in variable_infos:
             for dimension in variable_infos[variable_info]['dimensions']:
                 if not dimension in dimensions:
-                    dimensions[dimension] = variable_infos[dimension]['size']
+                    if not dimension in variable_infos and variable_info.split('_')[-1] == 'bnds':
+                        dimensions[dimension] = 2
+                    else:
+                        dimensions[dimension] = variable_infos[dimension]['size']
     return dimensions, variable_infos, attributes
 
 
@@ -512,6 +515,25 @@ class CciOdp:
     def dataset_names(self) -> List[str]:
         return list(self._datasets_to_uuid.keys())
 
+    def get_dataset_info(self, dataset_id: str) -> dict:
+        data_info = {}
+        dataset_metadata = self.get_dataset_metadata(dataset_id)
+        nc_attrs = dataset_metadata.get('attributes', {}).get('NC_GLOBAL', {})
+        if 'geospatial_lat_resolution' in nc_attrs:
+            data_info['lat_res'] = float(nc_attrs['geospatial_lat_resolution'])
+        else:
+            data_info['lat_res'] = float(nc_attrs['resolution'].split('x')[0].split('deg')[0])
+        if 'geospatial_lon_resolution' in nc_attrs:
+            data_info['lon_res'] = float(nc_attrs['geospatial_lon_resolution'])
+        else:
+            data_info['lon_res'] = float(nc_attrs['resolution'].split('x')[1].split('deg')[0])
+        data_info['bbox'] = (float(dataset_metadata['bbox_minx']), float(dataset_metadata['bbox_miny']),
+                             float(dataset_metadata['bbox_maxx']), float(dataset_metadata['bbox_maxy']))
+        data_info['temporal_coverage_start'] = '2000-02-01T00:00:00'
+        data_info['temporal_coverage_end'] = '2014-12-31T23:59:59'
+        data_info['var_names'] = self.var_names(dataset_id)
+        return data_info
+
     def get_dataset_metadata(self, dataset_id: str) -> dict:
         return asyncio.run(_fetch_dataset_metadata(self._datasets_to_uuid[dataset_id]))
 
@@ -613,32 +635,61 @@ class CciOdp:
     async def _var_names(self, dataset_name) -> List:
         async with aiohttp.ClientSession() as session:
             dimensions, variable_infos, attributes = await _fetch_variable_infos(self._datasets_to_fid[dataset_name], session)
-            coordinate_variable_names = ['lat', 'lon', 'time', 'lat_bnds', 'lon_bnds', 'time_bnds', 'crs', 'layers']
+            # todo support variables with other dimensions
             variables = []
             for variable in variable_infos:
-                if len(variable_infos[variable]['dimensions']) == 0:
+                dimensions = variable_infos[variable]['dimensions']
+                if ('lat' not in dimensions and 'latitude' not in dimensions) or\
+                        ('lon' not in dimensions and 'longitude' not in dimensions) or\
+                        (len(dimensions) > 2 and 'time' not in dimensions):
                     continue
-                if variable in dimensions:
-                    continue
-                if variable not in coordinate_variable_names:
-                    variables.append(variable)
+                variables.append(variable)
             return variables
 
-    def get_dimension_data(self, dataset_name: str, dimension_name: str):
+    def get_dimension_data(self, dataset_name: str, dimension_names: List[str]):
         request = dict(parentIdentifier=self._datasets_to_fid[dataset_name],
                        startDate='1900-01-01T00:00:00',
-                       endDate='2001-12-31T00:00:00')
+                       endDate='3001-12-31T00:00:00')
         opendap_url = self._get_opendap_url(request)
-        dataset = open_url(opendap_url)
-        return dataset[dimension_name].data[:].tolist()
+        dim_data = {}
+        if opendap_url:
+            dataset = open_url(opendap_url)
+            for dim in dimension_names:
+                if dim in dataset:
+                    dim_data[dim] = dataset[dim].data[:].tolist()
+                else:
+                    dim_data[dim] = []
+        return dim_data
+
+    def get_earliest_start_date(self, dataset_name: str, start_time: str, end_time: str, frequency: str) -> \
+            Optional[datetime]:
+        query_args = dict(parentIdentifier=self.get_fid_for_dataset(dataset_name),
+                          startDate=start_time,
+                          endDate=end_time,
+                          frequency=frequency,
+                          fileFormat='.nc')
+        opendap_url = self._get_opendap_url(query_args, get_earliest=True)
+        if opendap_url:
+            dataset = open_url(opendap_url)
+            start_time_attributes = ['time_coverage_start', 'start_date']
+            attributes = dataset.attributes.get('NC_GLOBAL', {})
+            for start_time_attribute in start_time_attributes:
+                start_time_string = attributes[start_time_attribute]
+                time_format, start, end = find_datetime_format(start_time_string)
+                if time_format:
+                    start_time = datetime.strptime(start_time_string[start:end], time_format)
+                    return start_time
+        return None
 
     def get_fid_for_dataset(self, dataset_name: str) -> str:
         return self._datasets_to_fid[dataset_name]
 
-    def _get_opendap_url(self, request: Dict):
+    def _get_opendap_url(self, request: Dict, get_earliest:bool=False):
         start_date = datetime.strptime(request['startDate'], _TIMESTAMP_FORMAT)
         end_date = datetime.strptime(request['endDate'], _TIMESTAMP_FORMAT)
         feature_list = asyncio.run(_fetch_opensearch_feature_list(_OPENSEARCH_CEDA_URL, request))
+        opendap_url = None
+        earliest_date = datetime(2999, 12, 31)
         for feature in feature_list:
             feature_props = feature.get("properties", {})
             date = feature_props.get("date", None)
@@ -647,46 +698,52 @@ class CciOdp:
             feature_dates = date.split('/')
             feature_start_date = datetime.strptime(feature_dates[0], _TIMESTAMP_FORMAT)
             feature_end_date = datetime.strptime(feature_dates[1], _TIMESTAMP_FORMAT)
-            if feature_start_date >= start_date and feature_end_date <= end_date:
+            if feature_start_date >= start_date and feature_end_date <= end_date and earliest_date > feature_start_date:
                 links = feature_props.get('links', {})
                 if 'related' in links:
                     for related_link in links['related']:
                         if related_link['title'] == 'Opendap':
-                            return related_link['href']
-        return None
+                            if get_earliest:
+                                earliest_date = feature_start_date
+                                opendap_url = related_link['href']
+                            else:
+                                return related_link['href']
+        return opendap_url
 
-    def get_data(self, request: Dict) -> bytes:
+    def get_data(self, request: Dict, bbox: Tuple[float, float, float, float], dim_indexes: dict, dim_flipped: dict)\
+            -> Optional[bytes]:
         start_date = datetime.strptime(request['startDate'], _TIMESTAMP_FORMAT)
         end_date = datetime.strptime(request['endDate'], _TIMESTAMP_FORMAT)
-        bbox = request['bbox']
         var_names = request['varNames']
-        request.pop('bbox')
         opendap_url = self._get_opendap_url(request)
+        if not opendap_url:
+            return None
         dataset = open_url(opendap_url)
-        dim_indexing = {}
         # todo support more dimensions
-        supported_dimensions = ['lat', 'lon', 'time']
+        supported_dimensions = ['lat', 'lon', 'time', 'latitude', 'longitude']
         result = bytearray()
         for i, var in enumerate(var_names):
             indexes = []
             for dimension in dataset[var].dimensions:
-                if dimension not in supported_dimensions:
-                    raise ValueError(f'Variable {var} has unsupported dimension {dimension}. '
-                                     f'Cannot retrieve this variable.')
-                # todo avoid asking for dimensions from remote. We already have these stored.
-                if dimension not in dim_indexing:
-                    dim_indexing[dimension] = self._get_indexing(dataset, dimension, bbox, start_date, end_date)
-                indexes.append(dim_indexing[dimension])
-            variable_data = dataset[var][tuple(indexes)].data[0].flatten()
-            result += np.array(variable_data, dtype=dataset[var].dtype.type).tobytes()
+                if dimension not in dim_indexes:
+                    if dimension not in supported_dimensions:
+                        raise ValueError(f'Variable {var} has unsupported dimension {dimension}. '
+                                         f'Cannot retrieve this variable.')
+                    dim_indexes[dimension] = self._get_indexing(dataset, dimension, bbox, start_date, end_date)
+                indexes.append(dim_indexes[dimension])
+            variable_data = np.array(dataset[var][tuple(indexes)].data[0], dtype=dataset[var].dtype.type)
+            for i, dimension in enumerate(dataset[var].dimensions):
+                if dim_flipped.get('dimension', False):
+                    variable_data = np.flip(variable_data, axis=i)
+            result += variable_data.flatten().tobytes()
         return result
 
 
     def _get_indexing(self, dataset, dimension: str, bbox:(float, float, float, float),
                       start_date: datetime, end_date: datetime):
-        if dimension == 'lat':
+        if dimension == 'lat' or dimension == 'latitude':
             return self._get_dim_indexing(dataset[dimension].data[:], bbox[1], bbox[3])
-        if dimension == 'lon':
+        if dimension == 'lon' or dimension == 'longitude':
             return self._get_dim_indexing(dataset[dimension].data[:], bbox[0], bbox[2])
         if dimension == 'time':
             return self._get_dim_indexing(dataset[dimension].data[:], start_date, end_date)

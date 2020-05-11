@@ -1,3 +1,4 @@
+import logging
 import os
 import unittest
 
@@ -21,10 +22,10 @@ class CciOdpTest(unittest.TestCase):
         request = dict(parentIdentifier='4eb4e801424a47f7b77434291921f889',
                        startDate='1997-05-01T00:00:00',
                        endDate='1997-05-01T00:00:00',
-                       bbox=(-10.0, 40.0, 10.0, 60.0),
                        varNames=['surface_pressure', 'O3e_du_tot']
                        )
-        data = cci_odp.get_data(request)
+        bbox = (-10.0, 40.0, 10.0, 60.0)
+        data = cci_odp.get_data(request, bbox, {})
         self.assertIsNotNone(data)
 
     def test_dataset_names(self):
@@ -52,3 +53,47 @@ class CciOdpTest(unittest.TestCase):
                           'adg_670_rmsd', 'adg_412_bias', 'adg_443_bias', 'adg_490_bias', 'adg_510_bias',
                           'adg_555_bias', 'adg_670_bias', 'kd_490_rmsd', 'kd_490_bias', 'SeaWiFS_nobs_sum',
                           'MODISA_nobs_sum', 'MERIS_nobs_sum', 'VIIRS_nobs_sum', 'total_nobs_sum'], var_names)
+
+    def test_get_dataset_info(self):
+        cci_odp = CciOdp()
+        dataset_info = cci_odp.get_dataset_info('esacci.CLOUD.month.L3C.CLD_PRODUCTS.MODIS.Terra.MODIS_TERRA.2-0.r1')
+        self.assertIsNotNone(dataset_info)
+        self.assertTrue('lat_res' in dataset_info)
+        self.assertEqual(0.5, dataset_info['lat_res'])
+        self.assertTrue('lon_res' in dataset_info)
+        self.assertEqual(0.5, dataset_info['lon_res'])
+        self.assertTrue('bbox' in dataset_info)
+        self.assertEqual((-180.0, -90.0, 180.0, 90.0), dataset_info['bbox'])
+        self.assertTrue('var_names' in dataset_info)
+        self.assertEqual(['nobs', 'nobs_day', 'nobs_clear_day', 'nobs_cloudy_day', 'nobs_clear_night',
+                          'nobs_cloudy_night', 'nobs_clear_twl', 'nobs_cloudy_twl', 'nobs_cloudy', 'nretr_cloudy',
+                          'nretr_cloudy_liq', 'nretr_cloudy_ice', 'nretr_cloudy_day', 'nretr_cloudy_day_liq',
+                          'nretr_cloudy_day_ice', 'nretr_cloudy_low', 'nretr_cloudy_mid', 'nretr_cloudy_high', 'cfc',
+                          'cfc_std', 'cfc_prop_unc', 'cfc_corr_unc', 'cfc_unc', 'cfc_low', 'cfc_mid', 'cfc_high',
+                          'cfc_day', 'cfc_night', 'cfc_twl', 'ctt', 'ctt_std', 'ctt_prop_unc', 'ctt_corr_unc',
+                          'ctt_unc', 'ctt_corrected', 'ctt_corrected_std', 'ctt_corrected_prop_unc',
+                          'ctt_corrected_corr_unc', 'ctt_corrected_unc', 'stemp', 'stemp_std', 'stemp_prop_unc',
+                          'stemp_corr_unc', 'stemp_unc', 'cth', 'cth_std', 'cth_prop_unc', 'cth_corr_unc', 'cth_unc',
+                          'cth_corrected', 'cth_corrected_std', 'cth_corrected_prop_unc', 'cth_corrected_corr_unc',
+                          'cth_corrected_unc', 'ctp', 'ctp_std', 'ctp_prop_unc', 'ctp_corr_unc', 'ctp_unc', 'ctp_log',
+                          'ctp_corrected', 'ctp_corrected_std', 'ctp_corrected_prop_unc', 'ctp_corrected_corr_unc',
+                          'ctp_corrected_unc', 'cph', 'cph_std', 'cph_day', 'cph_day_std', 'cer', 'cer_std',
+                          'cer_prop_unc', 'cer_corr_unc', 'cer_unc', 'cot', 'cot_log', 'cot_std', 'cot_prop_unc',
+                          'cot_corr_unc', 'cot_unc', 'cee', 'cee_std', 'cee_prop_unc', 'cee_corr_unc', 'cee_unc',
+                          'cla_vis006', 'cla_vis006_std', 'cla_vis006_prop_unc', 'cla_vis006_corr_unc',
+                          'cla_vis006_unc', 'cla_vis006_liq', 'cla_vis006_liq_std', 'cla_vis006_liq_unc',
+                          'cla_vis006_ice', 'cla_vis006_ice_std', 'cla_vis006_ice_unc', 'cla_vis008', 'cla_vis008_std',
+                          'cla_vis008_prop_unc', 'cla_vis008_corr_unc', 'cla_vis008_unc', 'cla_vis008_liq',
+                          'cla_vis008_liq_std', 'cla_vis008_liq_unc', 'cla_vis008_ice', 'cla_vis008_ice_std',
+                          'cla_vis008_ice_unc', 'lwp', 'lwp_std', 'lwp_prop_unc', 'lwp_corr_unc', 'lwp_unc',
+                          'lwp_allsky', 'iwp', 'iwp_std', 'iwp_prop_unc', 'iwp_corr_unc', 'iwp_unc', 'iwp_allsky',
+                          'cer_liq', 'cer_liq_std', 'cer_liq_prop_unc', 'cer_liq_corr_unc', 'cer_liq_unc', 'cer_ice',
+                          'cer_ice_std', 'cer_ice_prop_unc', 'cer_ice_corr_unc', 'cer_ice_unc', 'cot_liq',
+                          'cot_liq_std', 'cot_liq_prop_unc', 'cot_liq_corr_unc', 'cot_liq_unc', 'cot_ice',
+                          'cot_ice_std', 'cot_ice_prop_unc', 'cot_ice_corr_unc', 'cot_ice_unc', 'hist2d_cot_ctp',
+                          'hist1d_cot', 'hist1d_ctp', 'hist1d_ctt', 'hist1d_cer', 'hist1d_cwp', 'hist1d_cla_vis006',
+                          'hist1d_cla_vis008'], dataset_info['var_names'])
+        self.assertTrue('temporal_coverage_start' in dataset_info)
+        self.assertEqual('2000-02-01T00:00:00', dataset_info['temporal_coverage_start'])
+        self.assertTrue('temporal_coverage_end' in dataset_info)
+        self.assertEqual('2014-12-31T23:59:59', dataset_info['temporal_coverage_end'])
